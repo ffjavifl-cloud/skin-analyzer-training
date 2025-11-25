@@ -1,26 +1,46 @@
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from PIL import Image
 import io
 
-# Asegúrate de que model.py esté en la misma carpeta
+# Importa la función de predicción desde model.py
 from model import predict_scores
 
-app = FastAPI(title="Aging Analyzer API")
+# Inicializa la aplicación FastAPI
+app = FastAPI(title="Skin Analyzer Training API")
 
-# CORS: permite conexión desde tu frontend en GitHub Pages
+# Configuración de CORS: permite conexión desde tu frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Puedes restringir a ["https://ffjavifl-cloud.github.io"]
+    allow_origins=["*"],  # ⚠️ Puedes restringir a ["https://ffjavifl-cloud.github.io"] para mayor seguridad
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Emojis por severidad
+EMOJIS = {
+    "Mild": "🟢",
+    "Moderate": "🟠",
+    "Severe": "🔴"
+}
+
+# Clasificación clínica universal con rango intermedio
+def classify_severity(score: float) -> str:
+    if score < 4.5:
+        return "Mild"
+    elif score < 6.5:
+        return "Moderate"
+    else:
+        return "Severe"
+
+# Endpoint raíz para verificar estado
 @app.get("/")
 def root():
     return {"status": "ok"}
 
+# Endpoint principal de análisis
 @app.post("/analyze")
 async def analyze(file: UploadFile = File(...)):
     try:
@@ -30,6 +50,16 @@ async def analyze(file: UploadFile = File(...)):
 
         # Analizar imagen con tu modelo clínico
         scores = predict_scores(image)
+
+        # Clasificar cada parámetro con severidad y emoji
+        classified = {
+            param: {
+                "score": round(score, 2),
+                "severity": classify_severity(score),
+                "emoji": EMOJIS[classify_severity(score)]
+            }
+            for param, score in scores.items()
+        }
 
         # Diagnóstico basado en el parámetro más alto
         top_param = max(scores, key=lambda k: scores[k])
@@ -43,14 +73,13 @@ async def analyze(file: UploadFile = File(...)):
         }
         diagnosis = diagnosis_map.get(top_param, "Evaluación clínica general.")
 
-        return {
+        return JSONResponse(content={
             "diagnosis": diagnosis,
-            "scores": scores
-        }
+            "results": classified
+        })
 
     except Exception as e:
-        # Manejo de errores para que Swagger y el frontend lo vean
-        return {
+        return JSONResponse(content={
             "error": "No se pudo procesar la imagen",
             "details": str(e)
-        }
+        }, status_code=500)
